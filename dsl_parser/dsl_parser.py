@@ -1,6 +1,5 @@
 from lark import Lark, Transformer, v_args
-from cdf import CDF
-import os 
+from .cdf import CDF
 
 dsl_grammar = """
     ?start: sum
@@ -22,6 +21,7 @@ dsl_grammar = """
     %import common.WS_INLINE
     %ignore WS_INLINE
 """
+
 
 @v_args(inline=True)
 class DSLParser(Transformer):
@@ -48,10 +48,11 @@ def interface(file: str, m_cdfs):
     vars = {f"n{idx}": v for idx, v in enumerate(m_cdfs)}
 
     dsl = Lark(dsl_grammar, parser='lalr', transformer=DSLParser(vars))
-    
+
     with open(file, 'r') as file:
         for line in file:
-            print(dsl.parse(line.strip()))
+            r = dsl.parse(line.strip())
+    return r
 
 
 def main():

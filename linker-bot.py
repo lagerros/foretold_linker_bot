@@ -4,9 +4,9 @@ import json
 import yaml
 import argparse
 from typing import List
-from utilities import CDF
-from itertools import zip_longest
-
+import dsl_parser.dsl_parser as dl
+from dsl_parser.cdf import CDF
+from functools import reduce
 
 get_query = """
 query{
@@ -104,6 +104,7 @@ class LinkerBot(Bot):
     def __init__(self, measurable, measurables: List, *args, **kwargs):
         self.measurable = measurable
         self.measurables = measurables
+        self.ucl = "dsl_parser/test.txt"
         return super().__init__(*args, **kwargs)
 
     def generate_mutation(self, CDF, measurable_id) -> str:
@@ -146,16 +147,22 @@ class LinkerBot(Bot):
         """
         return [CDF(n["node"]["value"]["floatCdf"]["xs"], n["node"]["value"]["floatCdf"]["ys"]) for n in response["data"]["measurable"]["Measurements"]["edges"]]
 
-    def user_combination_logic(self):
-        #TODO handle combos of cdfs
-        #zipped_cdfs = zip_longest(all_cdfs, fillvalue=CDF([0.0], [0.0]))
-        #Differentiate between xs ys
-        #xs = average(cdf.xs for cdf in zipped_cdfs)
-        #ys average(cdf.ys for csf in zipped_cdfs)
-        
-        xs = [1.0, 2.0, 3.0, 4.0, 5.0]
-        ys = [0.01, 0.5, 0.8, 0.45, 0.01]
-        return xs, ys
+    def user_combination_logic(self, m_cdfs):
+        """
+        This function takes in the user defined logic, provides the file loc to the parser, along w/ the values for the nodes.
+        Returns new XS, YS
+
+        """
+        """measurable_cdfs[i] is a var(list) to send to the parser"""
+
+        #Aggregate each measurable
+        #TODO: Will change to allow more specificity
+
+        agg_measurables = [
+            reduce(lambda x, y: x.combine_cdf(y), m) for m in m_cdfs]
+        nCDF = json.load(dl.interface(self.ucl, agg_measurables))
+        #TODO: Change load pattern so returned json can be used for new CDF
+        return nCDF['floatCDF']['xs'], nCDF['floatCDF']['ys']
 
     def get_agents_measurements_from_measurable(self, mId):
         return f"""
@@ -178,13 +185,13 @@ class LinkerBot(Bot):
                 }}
                 }}
             """
-            
+
     def process_agents_cdfs(self, response):
         for n in response["data"]["measurable"]["Measurements"]["edges"]:
             if n["node"]["agentId"] == self.agent_id:
                 return CDF(n["node"]["value"]["floatCdf"]["xs"], n["node"]["value"]["floatCdf"]["ys"])
         return None
-    
+
     def generate_sample_values(self):
         """Generates XS and YS from checking other measurables"""
         # creates a List(measurable) of List(measurements on that measurable) of CDFS
@@ -192,9 +199,8 @@ class LinkerBot(Bot):
         responses = self.query_multiple(
             self.measurables, self.get_measurable_cdf)
         """List of List of CDFs, where the outer List is the Measurable and the Inner List is the CDF from the retrieved measurements"""
-        all_cdfs = [self.process_m_cdfs(r) for r in responses]
-
-        return self.user_combination_logic()
+        """[[CDF, CDF][CDF, CDF]]"""
+        return [self.process_m_cdfs(r) for r in responses]
 
     def alert_user_to_change(self):
         """Send an alert to the owner of the bot that there's been a change in one of their subscribed measurables"""
@@ -211,7 +217,9 @@ class LinkerBot(Bot):
         responses = self.query(q)
         cdf = self.process_agents_cdfs(responses)
         try:
-            xs, ys = self.generate_sample_values()
+            measurable_cdfs = self.generate_sample_values()
+            xs, ys = self.user_combination_logic(measurable_cdfs)
+            #TODO: Call user defined func
             nCDF = CDF(xs, ys)
             #TODO: Add equality check between lists
             if cdf == nCDF:
@@ -230,11 +238,13 @@ def main():
     except e as identifier:
         cfg = False
     if not cfg:
-        parser = argparse.ArgumentParser()
+        # TODO assign args instead of cfg for cli
+        # parser = argparse.ArgumentParser()
         cfg = None
     lb = LinkerBot(api_url=cfg['FORETOLD_API'], bot_token=cfg['BOT_TOKEN'], agent_id=cfg['AGENT_ID'],
                    measurable=cfg['MEASURABLE_PRIME'], measurables=cfg['MEASURABLES_SUBSCRIBED'])
     lb.update()
+
 
 if __name__ == "__main__":
     main()
